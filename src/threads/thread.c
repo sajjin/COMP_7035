@@ -37,6 +37,8 @@ static struct thread *initial_thread;
 /* Lock used by allocate_tid(). */
 static struct lock tid_lock;
 
+static struct list sleeping_list;
+
 /* Stack frame for kernel_thread(). */
 struct kernel_thread_frame 
   {
@@ -92,6 +94,7 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
+  list_init(&sleeping_list);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -100,6 +103,62 @@ thread_init (void)
   initial_thread->tid = allocate_tid ();
 }
 
+bool compare_wakeup_ticks(const struct list_elem *thread_a, const struct list_elem *thread_b, void *aux UNUSED) {
+    int64_t wakeup_ticks_a = list_entry(thread_a, struct thread, sleeping_elem)->ticks_to_wakeup;
+    int64_t wakeup_ticks_b = list_entry(thread_b, struct thread, sleeping_elem)->ticks_to_wakeup;
+
+    return wakeup_ticks_a < wakeup_ticks_b;
+}
+/* Wakes up threads whose wakeup time is less than or equal to the current ticks. */
+void wake_up_threads(int64_t current_ticks) {
+    struct list_elem *current_elem = list_begin(&sleeping_list);
+    struct list_elem *next_elem;
+    struct list_elem *end_of_list = list_end(&sleeping_list);
+
+    while (current_elem != end_of_list) {
+        struct thread *current_thread = list_entry(current_elem, struct thread, sleeping_elem);
+        
+        /* Since we might remove current_elem from the list, get the next element first */
+        next_elem = list_next(current_elem);
+
+        if (current_thread->ticks_to_wakeup <= current_ticks) {
+            //printf("waking up now\n");
+            
+            /* Remove the thread from the sleeping_list since it's waking up */
+            list_remove(current_elem);
+
+            list_push_back(&ready_list, &current_thread->elem);
+            current_thread->status = THREAD_READY;
+            /* We won't call schedule here, we'll wait until all threads are woken up */
+        }
+
+        current_elem = next_elem;
+    }
+
+    /* After all threads are processed and those that needed to wake up are woken, then schedule the next thread to run */
+    if (intr_context()) {
+        intr_yield_on_return();
+    } else {
+        schedule();
+    }
+}
+
+void thread_sleep(int64_t ticks_to_sleep) {
+    struct thread *current_thread = thread_current();
+
+    /* Assert the interrupt level is off. */
+    ASSERT(intr_get_level() == INTR_OFF);
+
+    /* Do nothing if the thread is an idle thread. */
+    if (current_thread == idle_thread) return;
+
+    current_thread->ticks_to_wakeup = ticks_to_sleep;
+
+    /* Insert the thread in a sorted manner based on wakeup time. */
+    list_insert_ordered(&sleeping_list, &current_thread->sleeping_elem, compare_wakeup_ticks, NULL);
+    
+    thread_block();
+}
 /* Starts preemptive thread scheduling by enabling interrupts.
    Also creates the idle thread. */
 void
@@ -582,3 +641,4 @@ allocate_tid (void)
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
+
