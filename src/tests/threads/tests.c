@@ -8,14 +8,7 @@ struct test
     const char *name;
     test_func *function;
   };
-  
-void
-test_thread(void *args UNUSED)
-{
-  printf("sleeping ..\n");
-  timer_sleep(100);
-  printf("Awake!\n");
-}
+
 static const struct test tests[] = 
   {
     {"alarm-single", test_alarm_single},
@@ -45,10 +38,12 @@ static const struct test tests[] =
     {"mlfqs-nice-2", test_mlfqs_nice_2},
     {"mlfqs-nice-10", test_mlfqs_nice_10},
     {"mlfqs-block", test_mlfqs_block},
-    {"test_thread", test_thread},
   };
 
+
 static const char *test_name;
+
+printf("test_name: %s\n")
 
 /* Runs the test named NAME. */
 void
@@ -107,3 +102,4 @@ pass (void)
 {
   printf ("(%s) PASS\n", test_name);
 }
+
